@@ -1,0 +1,32 @@
+# 가상환경
+cv_env/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# 데이터셋 (용량이 크므로 제외)
+datasets/
+*.nii
+*.nii.gz
+*.pt
+
+# 학습 결과물
+output_sa/
+output_dir/
+*.pth
+*.ckpt
+
+# 전처리 로그 & 결과 이미지
+*.png
+*.jpg
+preprocess_log.txt
+
+# 노트북 체크포인트
+.ipynb_checkpoints/
+
+# 기타
+.DS_Store
+Thumbs.db
+*.log
