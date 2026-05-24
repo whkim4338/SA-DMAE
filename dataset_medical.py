@@ -124,14 +124,16 @@ def extract_slice_stack(
 class MedicalSliceDataset(Dataset):
     """PyTorch Dataset for 2.5D medical image slices centred on tumor ROI.
 
-    Works for both BraTS 2021 and EDG datasets by accepting a list of
-    (case_dir, case_id) tuples so filename patterns can differ per source.
+    Works for both BraTS 2021 and EDG datasets.
 
     Args:
         root        : path to dataset root directory
         modalities  : list of modality suffixes to stack as channels
         n_slices    : number of consecutive axial slices per sample
         target_size : spatial resolution each slice is resized to
+        seg_suffix  : filename suffix for the ROI file (e.g. "seg" or "mask")
+        mask_type   : "tumor" — use ROI file to find tumor center (default)
+                      "brain" — ROI is a brain mask (not tumor), use volume midpoint
         transform   : optional transform applied to the final tensor
     """
 
@@ -141,12 +143,19 @@ class MedicalSliceDataset(Dataset):
         modalities: List[str] = DEFAULT_MODALITIES,
         n_slices: int = 3,
         target_size: Tuple[int, int] = (224, 224),
+        seg_suffix: str = "seg",
+        mask_type: str = "tumor",
         transform=None,
     ):
+        assert mask_type in ("tumor", "brain"), \
+            "mask_type must be 'tumor' or 'brain'"
+
         self.root        = Path(root)
         self.modalities  = modalities
         self.n_slices    = n_slices
         self.target_size = target_size
+        self.seg_suffix  = seg_suffix
+        self.mask_type   = mask_type
         self.transform   = transform
 
         self.samples = self._scan_cases()
@@ -166,18 +175,22 @@ class MedicalSliceDataset(Dataset):
         return cases
 
     def _build_paths(self, case_dir: Path, case_id: str) -> Optional[dict]:
-        """Return file paths for a case, or None if any file is missing."""
+        """Return file paths for a case, or None if any required file is missing."""
         paths = {}
+
+        # Modality files
         for mod in self.modalities:
             p = case_dir / f"{case_id}_{mod}.nii.gz"
             if not p.exists():
                 return None
             paths[mod] = str(p)
 
-        seg_path = case_dir / f"{case_id}_seg.nii.gz"
-        if not seg_path.exists():
-            return None
-        paths["seg"] = str(seg_path)
+        # ROI file: try configured suffix first, then fallback to the other
+        fallback = "mask" if self.seg_suffix == "seg" else "seg"
+        roi_path = case_dir / f"{case_id}_{self.seg_suffix}.nii.gz"
+        if not roi_path.exists():
+            roi_path = case_dir / f"{case_id}_{fallback}.nii.gz"
+        paths["roi"]     = str(roi_path) if roi_path.exists() else None
         paths["case_id"] = case_id
         return paths
 
@@ -193,9 +206,13 @@ class MedicalSliceDataset(Dataset):
             for mod in self.modalities
         ]
 
-        # Find tumor center in Z-axis from segmentation mask
-        seg = load_volume(info["seg"])
-        center_z = find_tumor_center_z(seg)
+        # Determine center_z
+        if info["roi"] is None or self.mask_type == "brain":
+            # No tumor ROI → use volume midpoint
+            center_z = volumes[0].shape[2] // 2  # type: ignore[union-attr]
+        else:
+            roi = load_volume(info["roi"])
+            center_z = find_tumor_center_z(roi)
 
         # Extract (n_slices, C, H, W) tensor
         x = extract_slice_stack(volumes, center_z, self.n_slices, self.target_size)
@@ -213,9 +230,18 @@ def get_brats2021_dataset(root: str, **kwargs) -> MedicalSliceDataset:
     return MedicalSliceDataset(root, modalities=DEFAULT_MODALITIES, **kwargs)
 
 
-def get_edg_dataset(root: str, **kwargs) -> MedicalSliceDataset:
-    """EDG dataset — same modality convention as BraTS."""
-    return MedicalSliceDataset(root, modalities=DEFAULT_MODALITIES, **kwargs)
+def get_edg_dataset(root: str, mask_type: str = "tumor", **kwargs) -> MedicalSliceDataset:
+    """EDG dataset.
+
+    Args:
+        mask_type: "tumor" if mask file marks tumor region (use for center_z)
+                   "brain" if mask file marks whole brain (fall back to midpoint)
+    """
+    return MedicalSliceDataset(
+        root, modalities=DEFAULT_MODALITIES,
+        seg_suffix="mask", mask_type=mask_type,
+        **kwargs,
+    )
 
 
 def get_combined_dataset(brats_root: str, edg_root: str, **kwargs):
