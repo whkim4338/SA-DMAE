@@ -151,6 +151,13 @@ def get_args_parser():
     parser.add_argument("--pin_mem",      action="store_true")
     parser.set_defaults(pin_mem=False)
 
+    # Early stopping
+    parser.add_argument("--patience",     default=30,   type=int,
+                        help="Early stopping patience (epochs without val improvement). "
+                             "Set 0 to disable.")
+    parser.add_argument("--min_delta",    default=1e-4, type=float,
+                        help="Minimum improvement in val_loss to reset patience counter")
+
     # Logging / checkpointing
     parser.add_argument("--output_dir",   default="./output_sa", type=str)
     parser.add_argument("--log_dir",      default="./output_sa", type=str)
@@ -352,16 +359,19 @@ def main(args):
         log_writer = SummaryWriter(log_dir=args.log_dir)
 
     # ── 학습 시작 헤더 ────────────────────────────────────────────────────────
+    early_stop_str = f"patience={args.patience}" if args.patience > 0 else "disabled"
     print("=" * 65)
     print(f"  SA-DMAE Pre-training")
     print(f"  Epochs: {args.epochs}  |  Device: {device}  |  "
           f"Batch: {args.batch_size} x accum {args.accum_iter}")
     print(f"  sigma={args.sigma}  mask_ratio={args.mask_ratio}  "
           f"axial_depth={args.axial_depth}")
+    print(f"  early_stopping: {early_stop_str}  min_delta={args.min_delta}")
     print("=" * 65)
 
-    start_time   = time.time()
-    best_val     = float("inf")
+    start_time    = time.time()
+    best_val      = float("inf")
+    patience_cnt  = 0          # patience 카운터
 
     for epoch in range(args.start_epoch, args.epochs):
         epoch_start = time.time()
@@ -387,16 +397,31 @@ def main(args):
             epoch_time, elapsed, remaining,
         )
 
-        # ── Best val loss 추적 ────────────────────────────────────────────
-        if val_loss < best_val:
-            best_val = val_loss
+        # ── Best val loss 추적 & Early Stopping ──────────────────────────
+        if val_loss < best_val - args.min_delta:
+            best_val     = val_loss
+            patience_cnt = 0
             if args.output_dir:
                 misc.save_model(
                     args=args, model=model, model_without_ddp=model,
                     optimizer=optimizer, loss_scaler=loss_scaler,
                     epoch=epoch, suffix="best",
                 )
-            print(f"  [Best] val_loss improved → {best_val:.4f}  (checkpoint saved)")
+            print(f"  [Best] val_loss → {best_val:.4f}  (checkpoint-best.pth 저장)")
+        else:
+            patience_cnt += 1
+            if args.patience > 0:
+                print(f"  [EarlyStopping] 개선 없음 {patience_cnt}/{args.patience} epoch")
+            if args.patience > 0 and patience_cnt >= args.patience:
+                print(f"\n  [EarlyStopping] {args.patience} epoch 동안 개선 없음 → 학습 종료")
+                print(f"  Best val loss: {best_val:.4f}  (epoch {epoch - args.patience + 1})")
+                # 마지막 체크포인트 저장
+                if args.output_dir:
+                    misc.save_model(
+                        args=args, model=model, model_without_ddp=model,
+                        optimizer=optimizer, loss_scaler=loss_scaler, epoch=epoch,
+                    )
+                break
 
         # ── Periodic checkpoint ───────────────────────────────────────────
         if args.output_dir and (epoch % args.save_every == 0 or epoch + 1 == args.epochs):
@@ -407,16 +432,18 @@ def main(args):
 
         # ── TensorBoard: epoch 단위 ───────────────────────────────────────
         if log_writer is not None:
-            log_writer.add_scalar("train/loss_epoch", train_stats["loss"], epoch)
-            log_writer.add_scalar("val/loss_epoch",   val_loss,            epoch)
+            log_writer.add_scalar("train/loss_epoch",  train_stats["loss"], epoch)
+            log_writer.add_scalar("val/loss_epoch",    val_loss,            epoch)
+            log_writer.add_scalar("early_stop/patience_cnt", patience_cnt,  epoch)
             log_writer.flush()
 
         # ── log.txt ───────────────────────────────────────────────────────
         log_stats = {
-            "epoch":      epoch,
-            "train_loss": train_stats["loss"],
-            "val_loss":   val_loss,
-            "lr":         train_stats["lr"],
+            "epoch":       epoch,
+            "train_loss":  train_stats["loss"],
+            "val_loss":    val_loss,
+            "lr":          train_stats["lr"],
+            "patience_cnt": patience_cnt,
         }
         if args.output_dir and misc.is_main_process():
             with open(os.path.join(args.output_dir, "log.txt"), "a") as f:
