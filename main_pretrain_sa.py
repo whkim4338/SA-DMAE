@@ -104,12 +104,15 @@ def get_args_parser():
     # Dataset
     parser.add_argument("--data_path",    default="",  type=str,
                         help="BraTS root dir (NIfTI) or .pt directory (--preprocessed)")
+    parser.add_argument("--ucsf_path",    default="",  type=str,
+                        help="UCSF-PDGM .pt directory — combined with data_path when --preprocessed")
     parser.add_argument("--edg_path",     default="",  type=str,
                         help="EDG root dir — combined with data_path when provided")
     parser.add_argument("--preprocessed", action="store_true",
                         help="Load pre-extracted .pt slices instead of raw NIfTI")
     parser.add_argument("--modalities",   default=["t1ce", "t2", "flair"], nargs="+")
-    parser.add_argument("--num_workers",  default=2,   type=int)
+    parser.add_argument("--num_workers",  default=4,   type=int,
+                        help="DataLoader workers (use 0 on Windows if errors occur)")
     parser.add_argument("--pin_mem",      action="store_true")
     parser.set_defaults(pin_mem=False)
 
@@ -213,8 +216,16 @@ def main(args):
 
     # ── Dataset ──────────────────────────────────────────────────────────────
     if args.preprocessed:
-        dataset_train = PreprocessedDataset(args.data_path)
-        print(f"Preprocessed dataset: {len(dataset_train)} samples from {args.data_path}")
+        dataset_brats = PreprocessedDataset(args.data_path)
+        if args.ucsf_path:
+            from torch.utils.data import ConcatDataset
+            dataset_ucsf  = PreprocessedDataset(args.ucsf_path)
+            dataset_train = ConcatDataset([dataset_brats, dataset_ucsf])
+            print(f"Preprocessed dataset: {len(dataset_brats)} BraTS + "
+                  f"{len(dataset_ucsf)} UCSF = {len(dataset_train)} total")
+        else:
+            dataset_train = dataset_brats
+            print(f"Preprocessed dataset: {len(dataset_train)} samples from {args.data_path}")
     elif args.edg_path:
         dataset_train = get_combined_dataset(
             args.data_path, args.edg_path,
