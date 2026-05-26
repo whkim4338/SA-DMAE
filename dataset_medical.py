@@ -307,21 +307,25 @@ class UCSFPDGMDataset(Dataset):
         return cases
 
     def _build_paths(self, case_dir: Path) -> Optional[dict]:
-        """Return file paths; return None if required files are missing."""
+        """Return file paths; return None if any required file is missing.
+
+        T2가 없는 케이스는 데이터 품질 일관성을 위해 스킵.
+        (501개 중 178개가 T2 없음 → zeros 채움 시 35% 오염 우려)
+        """
         flair = self._find_file(case_dir, "*FLAIR_bias.nii")
         t1ce  = self._find_file(case_dir, "*T1gad_bias.nii")
-        t2    = self._find_file(case_dir, "*_T2.nii.gz")      # optional
+        t2    = self._find_file(case_dir, "*_T2.nii.gz")
         seg   = self._find_file(case_dir, "*tumor_segmentation.nii")
 
-        # FLAIR, T1ce, seg 세 가지는 필수
-        if flair is None or t1ce is None or seg is None:
+        # FLAIR, T1ce, T2, seg 모두 필수
+        if any(f is None for f in [flair, t1ce, t2, seg]):
             return None
 
         return {
             "case_id" : case_dir.name,
             "flair"   : str(flair),
             "t1ce"    : str(t1ce),
-            "t2"      : str(t2) if t2 else None,   # None → 나중에 zeros로 대체
+            "t2"      : str(t2),
             "seg"     : str(seg),
         }
 
@@ -331,18 +335,12 @@ class UCSFPDGMDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, str]:
         info = self.samples[idx]
 
-        # T1ce, FLAIR 로드 & 정규화
-        t1ce_vol  = normalize_volume(load_volume(info["t1ce"]))
-        flair_vol = normalize_volume(load_volume(info["flair"]))
-
-        # T2: 있으면 로드, 없으면 zeros
-        if info["t2"] is not None:
-            t2_vol = normalize_volume(load_volume(info["t2"]))
-        else:
-            t2_vol = np.zeros_like(flair_vol)
-
-        # 채널 순서: T1ce / T2 / FLAIR  (BraTS와 동일)
-        volumes = [t1ce_vol, t2_vol, flair_vol]
+        # 로드 & 정규화 — 채널 순서: T1ce / T2 / FLAIR (BraTS와 동일)
+        volumes = [
+            normalize_volume(load_volume(info["t1ce"])),
+            normalize_volume(load_volume(info["t2"])),
+            normalize_volume(load_volume(info["flair"])),
+        ]
 
         # 종양 center_z
         seg      = load_volume(info["seg"])
