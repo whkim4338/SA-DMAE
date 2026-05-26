@@ -244,9 +244,114 @@ def get_edg_dataset(root: str, mask_type: str = "tumor", **kwargs) -> MedicalSli
     )
 
 
-def get_combined_dataset(brats_root: str, edg_root: str, **kwargs):
-    """Concatenate BraTS 2021 and EDG into a single dataset."""
+def get_combined_dataset(brats_root: str, ucsf_root: str, **kwargs):
+    """Concatenate BraTS 2021 and UCSF-PDGM into a single dataset."""
     from torch.utils.data import ConcatDataset
     brats = get_brats2021_dataset(brats_root, **kwargs)
-    edg   = get_edg_dataset(edg_root, **kwargs)
-    return ConcatDataset([brats, edg])
+    ucsf  = UCSFPDGMDataset(ucsf_root, **kwargs)
+    return ConcatDataset([brats, ucsf])
+
+
+# ── UCSF-PDGM Dataset ────────────────────────────────────────────────────────
+
+class UCSFPDGMDataset(Dataset):
+    """PyTorch Dataset for UCSF-PDGM (Kaggle version).
+
+    File structure per case:
+        {case_id}_nifti/
+        ├── {case_id}_FLAIR_bias.nii/{case_id}_FLAIR_bias.nii
+        ├── {case_id}_T1c_bias.nii/{case_id}_T1gad_bias.nii
+        ├── {case_id}_T2.nii.gz                               ← optional
+        └── {case_id}_tumor_segmentation.nii/
+            └── {case_id}_tumor_segmentation.nii
+
+    Channel order (same as BraTS): T1ce / T2 / FLAIR
+    T2 missing → filled with zeros (same shape as FLAIR)
+
+    Args:
+        root        : path to dataset root (contains *_nifti folders)
+        n_slices    : number of consecutive axial slices per sample
+        target_size : spatial resolution each slice is resized to
+        transform   : optional transform
+    """
+
+    def __init__(
+        self,
+        root: str,
+        n_slices: int = 3,
+        target_size: Tuple[int, int] = (224, 224),
+        transform=None,
+    ):
+        self.root        = Path(root)
+        self.n_slices    = n_slices
+        self.target_size = target_size
+        self.transform   = transform
+
+        self.samples = self._scan_cases()
+        if len(self.samples) == 0:
+            raise RuntimeError(f"No valid UCSF-PDGM cases found under {root}")
+
+    def _find_file(self, case_dir: Path, pattern: str) -> Optional[Path]:
+        """Glob for first *file* matching pattern (skips directories)."""
+        matches = [p for p in case_dir.rglob(pattern) if p.is_file()]
+        return matches[0] if matches else None
+
+    def _scan_cases(self) -> List[dict]:
+        cases = []
+        for case_dir in sorted(self.root.iterdir()):
+            if not case_dir.is_dir():
+                continue
+            info = self._build_paths(case_dir)
+            if info is not None:
+                cases.append(info)
+        return cases
+
+    def _build_paths(self, case_dir: Path) -> Optional[dict]:
+        """Return file paths; return None if required files are missing."""
+        flair = self._find_file(case_dir, "*FLAIR_bias.nii")
+        t1ce  = self._find_file(case_dir, "*T1gad_bias.nii")
+        t2    = self._find_file(case_dir, "*_T2.nii.gz")      # optional
+        seg   = self._find_file(case_dir, "*tumor_segmentation.nii")
+
+        # FLAIR, T1ce, seg 세 가지는 필수
+        if flair is None or t1ce is None or seg is None:
+            return None
+
+        return {
+            "case_id" : case_dir.name,
+            "flair"   : str(flair),
+            "t1ce"    : str(t1ce),
+            "t2"      : str(t2) if t2 else None,   # None → 나중에 zeros로 대체
+            "seg"     : str(seg),
+        }
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, str]:
+        info = self.samples[idx]
+
+        # T1ce, FLAIR 로드 & 정규화
+        t1ce_vol  = normalize_volume(load_volume(info["t1ce"]))
+        flair_vol = normalize_volume(load_volume(info["flair"]))
+
+        # T2: 있으면 로드, 없으면 zeros
+        if info["t2"] is not None:
+            t2_vol = normalize_volume(load_volume(info["t2"]))
+        else:
+            t2_vol = np.zeros_like(flair_vol)
+
+        # 채널 순서: T1ce / T2 / FLAIR  (BraTS와 동일)
+        volumes = [t1ce_vol, t2_vol, flair_vol]
+
+        # 종양 center_z
+        seg      = load_volume(info["seg"])
+        center_z = find_tumor_center_z(seg)
+
+        # (n_slices, 3, H, W) 텐서 추출
+        x = extract_slice_stack(volumes, center_z, self.n_slices, self.target_size)
+
+        if self.transform is not None:
+            x = self.transform(x)
+
+        return x, info["case_id"]
