@@ -218,15 +218,20 @@ class SpatialAxialDMAE(nn.Module):
         # neighbor_feats: list of (B, L+1, D), length = n_slices - 1
 
         # ── ViT blocks ────────────────────────────────────────────────────────
-        spatial_blocks = self.blocks[: -self.axial_depth]
-        late_blocks    = self.blocks[-self.axial_depth :]
+        # axial_depth=0 이면 전체 블록을 spatial only로 처리 (DMAE 동작과 동일)
+        if self.axial_depth > 0:
+            spatial_blocks = self.blocks[: -self.axial_depth]
+            late_blocks    = self.blocks[-self.axial_depth:]
+        else:
+            spatial_blocks = self.blocks
+            late_blocks    = []
 
-        # Early blocks: spatial only (neighbors processed with shared weights)
+        # Early blocks: spatial + neighbor (shared weights)
         for blk in spatial_blocks:
             x = blk(x)
             neighbor_feats = [blk(xn) for xn in neighbor_feats]
 
-        # Late blocks: ViT block → Axial Attention (interleaved)
+        # Late blocks: ViT block → Axial Attention (axial_depth=0이면 스킵)
         for blk, axial_blk in zip(late_blocks, self.axial_blocks):
             x = blk(x)
             neighbor_feats = [blk(xn) for xn in neighbor_feats]
