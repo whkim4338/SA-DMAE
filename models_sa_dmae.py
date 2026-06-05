@@ -242,6 +242,34 @@ class SpatialAxialDMAE(nn.Module):
         x = self.norm(x)
         return x, mask, ids_restore
 
+    # ── Clean Encode (no noise/masking, for downstream tasks) ───────────────
+
+    def encode(self, x_slices):
+        """Encode without noise or masking — used for downstream fine-tuning.
+
+        x_slices: (B, n_slices, C, H, W)  values in [0, 1]
+        Returns : (B, L+1, embed_dim)  — CLS token + patch tokens
+        """
+        B, N, C, H, W = x_slices.shape
+
+        # Normalise (same as forward)
+        if self.mean.device != x_slices.device:
+            self.mean = self.mean.to(x_slices.device)
+            self.std  = self.std.to(x_slices.device)
+        mean = self.mean
+        std  = self.std
+        if C == 1:
+            mean = mean.mean(dim=1, keepdim=True)
+            std  = std.mean(dim=1, keepdim=True)
+        x_norm = (x_slices - mean.unsqueeze(1)) / std.unsqueeze(1)
+
+        # Temporarily disable noise
+        sigma_bak, self.sigma = self.sigma, 0.0
+        latent, _, _ = self.forward_encoder(x_norm, mask_ratio=0.0)
+        self.sigma = sigma_bak
+
+        return latent  # (B, L+1, D)
+
     # ── Decoder (identical to DMAE) ──────────────────────────────────────────
 
     def forward_decoder(self, x, ids_restore):
