@@ -165,6 +165,27 @@ tensorboard --logdir ./output_sa
 
 ---
 
+## 실험 결과
+
+### Pre-training (BraTS 2021 + UCSF-PDGM, 1,569 cases)
+
+| 모델 | Val Loss | 에폭 |
+|------|----------|------|
+| DMAE (baseline) | 0.1067 | 200 |
+| **SA-DMAE (ours)** | **0.0411** | **200** |
+
+### 복원 품질 비교 (100 샘플 평균)
+
+| 모델 | MSE ↓ | PSNR ↑ (dB) | SSIM ↑ |
+|------|-------|-------------|--------|
+| DMAE (baseline) | 0.0047 | 23.50 | 0.7671 |
+| **SA-DMAE (ours)** | **0.0019** | **27.55** | **0.8593** |
+| 개선 | -60.5% | +4.06 dB | +0.0922 |
+
+> 비교 실험 코드: `colab_compare.ipynb`
+
+---
+
 ## 베이스라인
 
 이 프로젝트는 [DMAE (ICLR 2023)](https://github.com/quanlin-wu/dmae) 를 기반으로 합니다.
