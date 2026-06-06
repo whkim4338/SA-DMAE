@@ -71,6 +71,7 @@ def get_args():
 
     # Checkpoint / output
     p.add_argument("--resume",      default="", help="Pre-trained encoder checkpoint")
+    p.add_argument("--resume_seg",  default="", help="Resume seg fine-tuning from checkpoint")
     p.add_argument("--output_dir",  default="./output_seg")
     p.add_argument("--log_dir",     default="")
     p.add_argument("--save_every",  type=int, default=10)
@@ -210,9 +211,21 @@ def main():
         lr=args.lr, weight_decay=args.weight_decay,
     )
 
-    # ── Training Loop ────────────────────────────────────────────────────────
-    best_dice = 0.0
+    # ── Resume seg fine-tuning ───────────────────────────────────────────────
+    start_epoch  = 0
+    best_dice    = 0.0
     patience_cnt = 0
+
+    if args.resume_seg:
+        seg_ckpt = torch.load(args.resume_seg, map_location="cpu", weights_only=False)
+        model.load_state_dict(seg_ckpt["model"])
+        optimizer.load_state_dict(seg_ckpt["optimizer"])
+        start_epoch  = seg_ckpt["epoch"] + 1
+        best_dice    = seg_ckpt.get("best_dice", 0.0)
+        patience_cnt = seg_ckpt.get("patience_cnt", 0)
+        print(f"Resumed from {args.resume_seg} (epoch {start_epoch}, best_dice {best_dice:.4f})")
+
+    # ── Training Loop ────────────────────────────────────────────────────────
     log_path = Path(args.output_dir) / "log_seg.txt"
     start_total = time.time()
 
@@ -220,7 +233,7 @@ def main():
     print(f"Epochs: {args.epochs} | Batch: {args.batch_size} | LR: {args.lr}")
     print("=" * 65)
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         cur_lr = cosine_lr(optimizer, epoch, args.warmup_epochs,
                            args.epochs, args.lr, args.min_lr)
 
@@ -267,10 +280,16 @@ def main():
         else:
             patience_cnt += 1
 
-        # Periodic checkpoint
+        # Periodic checkpoint (includes optimizer for resume)
         if args.save_every > 0 and (epoch + 1) % args.save_every == 0:
-            torch.save({"model": model.state_dict(), "epoch": epoch, "args": args},
-                       Path(args.output_dir) / f"checkpoint-{epoch+1}.pth")
+            torch.save({
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": epoch,
+                "best_dice": best_dice,
+                "patience_cnt": patience_cnt,
+                "args": args,
+            }, Path(args.output_dir) / f"checkpoint-{epoch+1}.pth")
 
         # Early stopping
         if args.patience > 0 and patience_cnt >= args.patience:
