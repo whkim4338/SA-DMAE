@@ -89,11 +89,17 @@ class SADMAESegmentation(nn.Module):
 
 # ── Loss functions ────────────────────────────────────────────────────────────
 
-def dice_loss(pred: torch.Tensor, target: torch.Tensor, smooth: float = 1.0) -> torch.Tensor:
+# BraTS 클래스 불균형 보정: 종양 픽셀(~5%)에 가중치 부여 [WT, TC, ET]
+# 배경 대비 종양 픽셀 비율의 역수 — 실험적으로 튜닝된 값
+POS_WEIGHT = torch.tensor([10.0, 15.0, 20.0])  # WT / TC / ET
+
+
+def dice_loss(pred: torch.Tensor, target: torch.Tensor, smooth: float = 1e-5) -> torch.Tensor:
     """Soft Dice loss.
 
     pred  : (B, C, H, W)  raw logits
     target: (B, C, H, W)  binary float masks
+    smooth: 작은 값 사용 — 종양이 없는 슬라이스에서 trivial solution 방지
     """
     pred = pred.sigmoid()
     intersection = (pred * target).sum(dim=(-2, -1))
@@ -103,9 +109,18 @@ def dice_loss(pred: torch.Tensor, target: torch.Tensor, smooth: float = 1.0) -> 
 
 
 def seg_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Combined Dice + BCE loss (equal weighting)."""
+    """Combined Dice + weighted BCE loss.
+
+    pos_weight: 종양 픽셀(소수)에 가중치를 줘서 클래스 불균형 보정.
+    """
     d = dice_loss(logits, target)
-    b = F.binary_cross_entropy_with_logits(logits, target)
+
+    # pos_weight를 logits device로 이동
+    pw = POS_WEIGHT.to(logits.device)
+    # (C,) → (1, C, 1, 1) for broadcasting
+    pw = pw.view(1, -1, 1, 1).expand_as(logits)
+    b = F.binary_cross_entropy_with_logits(logits, target, pos_weight=pw)
+
     return 0.5 * d + 0.5 * b
 
 
@@ -113,7 +128,7 @@ def seg_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def dice_score(logits: torch.Tensor, target: torch.Tensor,
-               threshold: float = 0.5, smooth: float = 1.0) -> torch.Tensor:
+               threshold: float = 0.5, smooth: float = 1e-5) -> torch.Tensor:
     """Per-class Dice score.
 
     Returns: (C,) tensor — one value per class
