@@ -45,7 +45,8 @@ def get_args():
     p = argparse.ArgumentParser("SA-DMAE Segmentation Fine-tuning")
 
     # Data
-    p.add_argument("--data_path",   required=True,  help="BraTS2021 root directory")
+    p.add_argument("--pt_dir",      required=True,  help="전처리된 BraTS .pt 파일 디렉터리")
+    p.add_argument("--nifti_dir",   required=True,  help="BraTS2021 NIfTI 원본 디렉터리 (seg 추출용)")
     p.add_argument("--n_slices",    type=int, default=3)
     p.add_argument("--img_size",    type=int, default=224)
     p.add_argument("--val_ratio",   type=float, default=0.2)
@@ -162,10 +163,10 @@ def main():
     writer  = SummaryWriter(log_dir=log_dir)
 
     # ── Dataset ──────────────────────────────────────────────────────────────
-    train_ds = BraTSSegDataset(args.data_path, n_slices=args.n_slices,
+    train_ds = BraTSSegDataset(args.pt_dir, args.nifti_dir,
                                img_size=args.img_size, split="train",
                                val_ratio=args.val_ratio)
-    val_ds   = BraTSSegDataset(args.data_path, n_slices=args.n_slices,
+    val_ds   = BraTSSegDataset(args.pt_dir, args.nifti_dir,
                                img_size=args.img_size, split="val",
                                val_ratio=args.val_ratio)
 
