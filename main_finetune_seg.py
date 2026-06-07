@@ -57,8 +57,14 @@ def get_args():
     p.add_argument("--axial_depth", type=int, default=4)
     p.add_argument("--sigma",       type=float, default=0.25)
     p.add_argument("--num_classes", type=int, default=3, help="WT/TC/ET")
-    p.add_argument("--freeze_encoder", action="store_true",
-                   help="Freeze encoder weights (linear probe mode)")
+    p.add_argument("--freeze_encoder", action="store_true", default=True,
+                   help="Freeze encoder weights, train decoder only (권장)")
+    p.add_argument("--no_freeze_encoder", dest="freeze_encoder", action="store_false",
+                   help="Encoder까지 fine-tuning (비권장: pre-trained 망가질 수 있음)")
+    p.add_argument("--dice_only", action="store_true", default=True,
+                   help="Dice loss만 사용 (기본값, class imbalance 강건)")
+    p.add_argument("--no_dice_only", dest="dice_only", action="store_false",
+                   help="Dice + weighted BCE 혼합 loss 사용")
 
     # Training
     p.add_argument("--epochs",      type=int, default=50)
@@ -108,7 +114,7 @@ def train_one_epoch(model, loader, optimizer, device, epoch, args):
 
         with torch.amp.autocast("cuda", enabled=(device == "cuda")):
             logits = model(x_slices)
-            loss   = seg_loss(logits, seg_masks)
+            loss   = seg_loss(logits, seg_masks, dice_only=args.dice_only)
 
         optimizer.zero_grad()
         loss.backward()
@@ -132,7 +138,7 @@ def train_one_epoch(model, loader, optimizer, device, epoch, args):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device):
+def evaluate(model, loader, device, dice_only=True):
     model.eval()
     total_loss = 0.0
     dice_sum   = torch.zeros(3, device=device)
@@ -144,7 +150,7 @@ def evaluate(model, loader, device):
 
         with torch.amp.autocast("cuda", enabled=(device == "cuda")):
             logits = model(x_slices)
-            loss   = seg_loss(logits, seg_masks)
+            loss   = seg_loss(logits, seg_masks, dice_only=dice_only)
 
         total_loss += loss.item()
         dice_sum   += dice_score(logits, seg_masks)
@@ -240,7 +246,7 @@ def main():
 
         t0 = time.time()
         train_loss = train_one_epoch(model, train_loader, optimizer, device, epoch, args)
-        val_loss, val_dice = evaluate(model, val_loader, device)
+        val_loss, val_dice = evaluate(model, val_loader, device, dice_only=args.dice_only)
         mean_dice = val_dice.mean().item()
         epoch_time = time.time() - t0
 

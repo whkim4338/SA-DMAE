@@ -108,19 +108,20 @@ def dice_loss(pred: torch.Tensor, target: torch.Tensor, smooth: float = 1e-5) ->
     return 1.0 - dice.mean()
 
 
-def seg_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Combined Dice + weighted BCE loss.
+def seg_loss(logits: torch.Tensor, target: torch.Tensor,
+             dice_only: bool = True) -> torch.Tensor:
+    """Segmentation loss.
 
-    pos_weight: 종양 픽셀(소수)에 가중치를 줘서 클래스 불균형 보정.
+    dice_only=True (기본값): Dice loss만 사용.
+      → 클래스 불균형에 강건, encoder freeze + fine-tuning에 적합.
+    dice_only=False: Dice + weighted BCE 혼합.
     """
     d = dice_loss(logits, target)
+    if dice_only:
+        return d
 
-    # pos_weight를 logits device로 이동
-    pw = POS_WEIGHT.to(logits.device)
-    # (C,) → (1, C, 1, 1) for broadcasting
-    pw = pw.view(1, -1, 1, 1).expand_as(logits)
-    b = F.binary_cross_entropy_with_logits(logits, target, pos_weight=pw)
-
+    pw = POS_WEIGHT.to(logits.device).view(1, -1, 1, 1).expand_as(logits)
+    b  = F.binary_cross_entropy_with_logits(logits, target, pos_weight=pw)
     return 0.5 * d + 0.5 * b
 
 
