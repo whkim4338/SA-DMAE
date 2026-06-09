@@ -18,9 +18,11 @@ output_dir/
 *.pth
 *.ckpt
 
-# 전처리 로그 & 결과 이미지
+# 전처리 로그 & 결과 이미지 (assets/ 제외)
 *.png
 *.jpg
+!assets/**/*.png
+!assets/**/*.jpg
 preprocess_log.txt
 
 # 노트북 체크포인트
