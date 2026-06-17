@@ -126,7 +126,7 @@ def get_args_parser():
 
     # SA-DMAE specific
     parser.add_argument("--n_slices",      default=3,    type=int)
-    parser.add_argument("--axial_depth",   default=4,    type=int)
+    parser.add_argument("--axial_depth",   default=2,    type=int)
 
     # Optimizer
     parser.add_argument("--weight_decay",  default=0.05,  type=float)

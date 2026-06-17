@@ -58,7 +58,7 @@ class SpatialAxialDMAE(nn.Module):
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4.0, norm_layer=nn.LayerNorm, norm_pix_loss=False,
         sigma=0.5,
-        n_slices=3, axial_depth=4,
+        n_slices=3, axial_depth=2,
     ):
         super().__init__()
 

@@ -12,11 +12,12 @@
 
 | 모델 | MSE ↓ | PSNR ↑ | SSIM ↑ | Val Loss |
 |------|-------|--------|--------|----------|
-| DMAE (baseline) | 0.0047 | 23.50 dB | 0.7671 | 0.1067 |
-| **SA-DMAE (ours)** | **0.0019** | **27.55 dB** | **0.8593** | **0.0411** |
-| **개선** | **−60.5%** | **+4.06 dB** | **+0.0922** | **−61.4%** |
+| DMAE (baseline) | 0.0051 | 23.07 dB | 0.7576 | 0.1067 |
+| **SA-DMAE (ours)** | **0.0019** | **27.47 dB** | **0.8636** | **0.0411** |
+| **개선** | **−62.7%** | **+4.40 dB** | **+0.1060** | **−61.4%** |
 
-> 100 샘플 평균 · Validation Set · 동일 데이터·하이퍼파라미터 조건에서 fair comparison
+> 100 샘플 평균 · Validation Set · 동일 데이터·하이퍼파라미터 조건에서 fair comparison  
+> SA-DMAE 최종 설정: `n_slices=3, axial_depth=2` (ablation 결과 기준 최적)
 
 ---
 
@@ -90,6 +91,16 @@ Input: (B, 3, 3, 224, 224)
 
 - SA-DMAE: train/val 갭 0.002 → 과적합 없이 안정적 수렴
 - DMAE baseline: 동일 아키텍처(n_slices=1, axial_depth=0)로 fair comparison 재현
+
+### Ablation: axial_depth 비교
+
+| axial_depth | MSE ↓ | PSNR ↑ | SSIM ↑ | 비고 |
+|---|---|---|---|---|
+| 0 | 0.0051 | 23.07 dB | 0.7576 | DMAE (baseline) |
+| **2** | **0.0019** | **27.47 dB** | **0.8636** | **SA-DMAE (최종 설정)** |
+| 4 | 0.0019 | 27.37 dB | 0.8581 | SA-DMAE (heavy) |
+
+> axial_depth=2에서 대부분의 성능 향상이 달성됨. depth=2→4 간 차이는 미미(0.1 dB)하여 depth=2를 기본값으로 채택.
 
 ### PSNR 상세 비교 (FLAIR, 샘플별)
 
@@ -224,7 +235,7 @@ python main_pretrain_sa.py \
 | 인자 | 기본값 | 설명 |
 |------|--------|------|
 | `--n_slices` | `3` | 연속 슬라이스 수 (홀수, SA-DMAE: 3, DMAE: 1) |
-| `--axial_depth` | `4` | AxialAttentionBlock 레이어 수 (DMAE: 0) |
+| `--axial_depth` | `2` | AxialAttentionBlock 레이어 수 (DMAE: 0) |
 | `--sigma` | `0.25` | Gaussian noise 표준편차 |
 | `--mask_ratio` | `0.75` | 랜덤 마스킹 비율 |
 | `--lr` | `1.5e-4` | Learning rate |

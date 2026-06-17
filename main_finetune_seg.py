@@ -54,7 +54,7 @@ def get_args():
 
     # Model
     p.add_argument("--model",       default="sa_dmae_vit_base_patch16")
-    p.add_argument("--axial_depth", type=int, default=4)
+    p.add_argument("--axial_depth", type=int, default=2)
     p.add_argument("--sigma",       type=float, default=0.25)
     p.add_argument("--num_classes", type=int, default=3, help="WT/TC/ET")
     p.add_argument("--freeze_encoder", action="store_true", default=True,
